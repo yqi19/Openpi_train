@@ -4,6 +4,7 @@ import abc
 from collections.abc import Sequence
 import dataclasses
 import difflib
+import hashlib
 import logging
 import pathlib
 from typing import Any, Literal, Protocol, TypeAlias
@@ -20,6 +21,7 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.maniskill_policy as maniskill_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -32,6 +34,21 @@ import openpi.transforms as _transforms
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
 Filter: TypeAlias = nnx.filterlib.Filter
+
+
+def _is_local_repo_id(repo_id: str | None) -> bool:
+    """True if repo_id looks like a local path (HF ids are 'name' or 'org/name')."""
+    if not repo_id or repo_id == "fake":
+        return False
+    if repo_id.startswith("/"):
+        return True
+    return repo_id.count("/") >= 2
+
+
+def local_path_asset_id(repo_id: str) -> str:
+    """Stable, unique asset_id for a local dataset path. Same path => same id; different paths => no overwrite."""
+    normalized = pathlib.Path(repo_id).resolve().as_posix()
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,7 +195,10 @@ class DataConfigFactory(abc.ABC):
 
     def create_base_config(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         repo_id = self.repo_id if self.repo_id is not tyro.MISSING else None
-        asset_id = self.assets.asset_id or repo_id
+        # Per-dataset asset_id for local paths so different datasets don't overwrite each other's norm_stats.
+        asset_id = self.assets.asset_id or (
+            local_path_asset_id(repo_id) if _is_local_repo_id(repo_id) else repo_id
+        )
         return dataclasses.replace(
             self.base_config or DataConfig(),
             repo_id=repo_id,
@@ -356,6 +376,54 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class LeRobotManiskillDataConfig(DataConfigFactory):
+    """
+    Config for Maniskill / Panda Lerobot datasets (8-dim state, 8-dim actions).
+    Same key layout as Libero; uses ManiskillInputs/ManiskillOutputs for 8-D actions.
+    """
+
+    extra_delta_transform: bool = False
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/image": "image",
+                        "observation/wrist_image": "wrist_image",
+                        "observation/state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[maniskill_policy.ManiskillInputs(model_type=model_config.model_type)],
+            outputs=[maniskill_policy.ManiskillOutputs()],
+        )
+
+        # For Panda: first 7 dims are joints (delta), 8th is gripper (absolute).
+        if self.extra_delta_transform:
+            delta_action_mask = _transforms.make_bool_mask(7, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class RLDSDroidDataConfig(DataConfigFactory):
     """
     Config for training on DROID, using RLDS data format (for efficient training on larger datasets).
@@ -469,7 +537,8 @@ class TrainConfig:
     # Project name.
     project_name: str = "openpi"
     # Experiment name. Will be used to name the metadata and checkpoint directories.
-    exp_name: str = tyro.MISSING
+    # Required for training (checkpoint_dir raises if empty). Optional for compute_norm_stats.
+    exp_name: str = ""
 
     # Defines the model config. Some attributes (action_dim, action_horizon, and max_token_len) are shared by all models
     # -- see BaseModelConfig. Specific model implementations (e.g., Pi0Config) inherit from BaseModelConfig and may
@@ -533,6 +602,9 @@ class TrainConfig:
     # eg. if total device is 4 and fsdp devices is 2; then the model will shard to 2 devices and run
     # data parallel between 2 groups of devices.
     fsdp_devices: int = 1
+
+    # Only used by scripts/compute_norm_stats.py: cap number of frames for computing norm stats (default: use all).
+    compute_norm_stats_max_frames: int | None = None
 
     @property
     def assets_dirs(self) -> pathlib.Path:
@@ -760,6 +832,29 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=30_000,
+    ),
+    ## finetune maniskill config
+    TrainConfig(
+        name="pi05_maniskill",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotManiskillDataConfig(
+            repo_id="/root/workspace/data_gen/0316_verb_color/lerobot_dataset",  #modify the dataset path
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/root/workspace/openpi/ckpt/pi05-libero",
+        num_train_steps=20_000,  # 总训练步数，可改（如 5000、10000）
+        save_interval=4000,  # 每多少 step 存一次 checkpoint，可改（如 500、2000）
     ),
     #
     # Fine-tuning Aloha configs.

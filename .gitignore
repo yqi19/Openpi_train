@@ -1,8 +1,20 @@
 # Data directories.
 assets/
-checkpoints/
 data/
 wandb/
+
+# ---------------------------------------------------------------------------
+# Checkpoints & model weights — do not commit (large / private training runs)
+# ---------------------------------------------------------------------------
+checkpoints/
+ckpt/
+# Downloaded or locally saved model weights (training checkpoints use these names)
+*.safetensors
+*.safetensors.index.json
+# Hugging Face / download locks (often empty while downloading)
+**/.cache/huggingface/**/*.lock
+# Optional: local training logs (uncomment if you do not want logs in git)
+# run/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

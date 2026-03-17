@@ -5,6 +5,7 @@ import os
 import typing
 from typing import Literal, Protocol, SupportsIndex, TypeVar
 
+import datasets.features.features as _dfeatures
 import jax
 import jax.numpy as jnp
 import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
@@ -127,6 +128,20 @@ class FakeDataset(Dataset):
         return self._num_samples
 
 
+def _is_local_dataset_path(repo_id: str) -> bool:
+    """True if repo_id is a local filesystem path (absolute or existing directory).
+    HF repo ids are only 'name' or 'org/name'; paths have leading / or multiple segments.
+    """
+    if not repo_id or repo_id == "fake":
+        return False
+    if os.path.isabs(repo_id):
+        return True
+    # "org/repo" has one slash; path-like "a/b/c" or "data/lerobot_dataset" has more or exists as dir
+    if repo_id.count("/") >= 2:
+        return True
+    return os.path.exists(repo_id) and os.path.isdir(repo_id)
+
+
 def create_torch_dataset(
     data_config: _config.DataConfig, action_horizon: int, model_config: _model.BaseModelConfig
 ) -> Dataset:
@@ -137,13 +152,25 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
-    dataset = lerobot_dataset.LeRobotDataset(
-        data_config.repo_id,
-        delta_timestamps={
-            key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
-        },
-    )
+    # LeRobot expects repo_id in form "name" or "org/name"; for local paths pass root= and a placeholder repo_id.
+    if _is_local_dataset_path(repo_id):
+        lerobot_repo_id = "local/dataset"
+        dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(lerobot_repo_id, root=repo_id)
+        dataset = lerobot_dataset.LeRobotDataset(
+            lerobot_repo_id,
+            root=repo_id,
+            delta_timestamps={
+                key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
+            },
+        )
+    else:
+        dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+        dataset = lerobot_dataset.LeRobotDataset(
+            data_config.repo_id,
+            delta_timestamps={
+                key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
+            },
+        )
 
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
