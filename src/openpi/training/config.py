@@ -853,8 +853,8 @@ _CONFIGS = [
         ema_decay=0.999,
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/root/workspace/openpi/ckpt/pi05-libero",
-        num_train_steps=20_000,  # 总训练步数，可改（如 5000、10000）
-        save_interval=4000,  # 每多少 step 存一次 checkpoint，可改（如 500、2000）
+        num_train_steps=20_000,  # eg. 5000、10000
+        save_interval=4000,  # how many steps to save the checkpoint
     ),
     #
     # Fine-tuning Aloha configs.
