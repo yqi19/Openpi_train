@@ -10,10 +10,10 @@ from openpi.models import model as _model
 def make_maniskill_example() -> dict:
     """Creates a random input example for the Maniskill (Panda) policy."""
     return {
-        "observation/state": np.random.rand(8),
+        "observation/state": np.random.rand(8).astype(np.float32),
         "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
-        "prompt": "do something",
+        "prompt": "Pick blue cube",
     }
 
 

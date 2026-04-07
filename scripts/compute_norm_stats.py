@@ -5,9 +5,11 @@ will compute the mean and standard deviation of the data in the dataset and save
 to the config assets directory.
 """
 
+import argparse
+import dataclasses
+
 import numpy as np
 import tqdm
-import tyro
 
 import openpi.models.model as _model
 import openpi.shared.normalize as normalize
@@ -19,6 +21,17 @@ import openpi.transforms as transforms
 class RemoveStrings(transforms.DataTransformFn):
     def __call__(self, x: dict) -> dict:
         return {k: v for k, v in x.items() if not np.issubdtype(np.asarray(v).dtype, np.str_)}
+
+
+@dataclasses.dataclass(frozen=True)
+class DataRepoOverride:
+    """Compatibility shim for passing --data.repo_id to this script.
+
+    We only override the data `repo_id`, while keeping the config's original concrete DataConfigFactory
+    (and therefore its transforms/repack/model transforms).
+    """
+
+    repo_id: str | None = None
 
 
 def create_torch_dataloader(
@@ -86,8 +99,15 @@ def create_rlds_dataloader(
     return data_loader, num_batches
 
 
-def main(config_name: str, max_frames: int | None = None):
+def main(config_name: str, max_frames: int | None = None, data: DataRepoOverride = DataRepoOverride()):
     config = _config.get_config(config_name)
+    if data.repo_id is not None:
+        # Keep the concrete data factory type (so transforms stay correct) but override repo_id.
+        config = dataclasses.replace(config, data=dataclasses.replace(config.data, repo_id=data.repo_id))
+
+    if max_frames is None:
+        max_frames = config.compute_norm_stats_max_frames
+
     data_config = config.data.create(config.assets_dirs, config.model)
 
     if data_config.rlds_data_dir is not None:
@@ -108,10 +128,41 @@ def main(config_name: str, max_frames: int | None = None):
 
     norm_stats = {key: stats.get_statistics() for key, stats in stats.items()}
 
-    output_path = config.assets_dirs / data_config.repo_id
-    print(f"Writing stats to: {output_path}")
-    normalize.save(output_path, norm_stats)
+    # Training-time loading uses `assets_dir / asset_id` (not `assets_dir / repo_id`).
+    # For backward compatibility, we also keep saving under `assets_dir / repo_id`.
+    # Note: when `repo_id` is an absolute path, `assets_dir / repo_id` becomes the absolute path itself.
+    asset_out_dir = config.assets_dirs / data_config.asset_id if data_config.asset_id is not None else None
+    repo_out_dir = config.assets_dirs / data_config.repo_id
+
+    if asset_out_dir is not None and asset_out_dir != repo_out_dir:
+        print(f"Writing stats to asset_id dir: {asset_out_dir}")
+        normalize.save(asset_out_dir, norm_stats)
+
+    print(f"Writing stats to repo_id dir: {repo_out_dir}")
+    normalize.save(repo_out_dir, norm_stats)
 
 
 if __name__ == "__main__":
-    tyro.cli(main)
+    parser = argparse.ArgumentParser(description="Compute normalization stats for a given config.")
+    parser.add_argument(
+        "config_name",
+        nargs="?",
+        default=None,
+        help="Config name to compute norm stats for (e.g. pi05_maniskill).",
+    )
+    parser.add_argument("--config-name", dest="config_name_opt", default=None, help="Alias for config name.")
+    parser.add_argument("--max-frames", type=int, default=None, help="Optional cap on number of frames.")
+    # Compat: accept both underscore and hyphen variants.
+    parser.add_argument("--data.repo_id", dest="data_repo_id", default=None)
+    parser.add_argument("--data.repo-id", dest="data_repo_id", default=None)
+
+    args = parser.parse_args()
+    resolved_config_name = args.config_name_opt or args.config_name
+    if not resolved_config_name:
+        parser.error("Missing config name. Provide positional <config_name> or --config-name <config_name>.")
+
+    main(
+        resolved_config_name,
+        max_frames=args.max_frames,
+        data=DataRepoOverride(repo_id=args.data_repo_id),
+    )

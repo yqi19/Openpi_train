@@ -374,15 +374,15 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
-
 @dataclasses.dataclass(frozen=True)
 class LeRobotManiskillDataConfig(DataConfigFactory):
     """
-    Config for Maniskill / Panda Lerobot datasets (8-dim state, 8-dim actions).
-    Same key layout as Libero; uses ManiskillInputs/ManiskillOutputs for 8-D actions.
+    ManiSkill demos in LeRobot format: ``image``, ``wrist_image``, ``state`` (8,), ``actions`` (8,).
+    Motion-planning trajectories use absolute joint targets for the first 7 dims and a gripper command
+    for the last dim; set ``use_joint_delta_transform=True`` (default) to match π₀ training (delta joints).
     """
 
-    extra_delta_transform: bool = False
+    use_joint_delta_transform: bool = True
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -399,28 +399,75 @@ class LeRobotManiskillDataConfig(DataConfigFactory):
                 )
             ]
         )
-
+        
         data_transforms = _transforms.Group(
             inputs=[maniskill_policy.ManiskillInputs(model_type=model_config.model_type)],
             outputs=[maniskill_policy.ManiskillOutputs()],
         )
 
-        # For Panda: first 7 dims are joints (delta), 8th is gripper (absolute).
-        if self.extra_delta_transform:
+        # what's the maniskill policy outputs format?
+        # todo: modify this
+        if self.use_joint_delta_transform:
             delta_action_mask = _transforms.make_bool_mask(7, -1)
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
             )
-
         model_transforms = ModelTransformFactory()(model_config)
-
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
+
+
+# @dataclasses.dataclass(frozen=True)
+# class LeRobotManiskillDataConfig(DataConfigFactory):
+#     """
+#     Config for Maniskill / Panda Lerobot datasets (8-dim state, 8-dim actions).
+#     Same key layout as Libero; uses ManiskillInputs/ManiskillOutputs for 8-D actions.
+#     """
+
+#     extra_delta_transform: bool = False
+
+#     @override
+#     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+#         repack_transform = _transforms.Group(
+#             inputs=[
+#                 _transforms.RepackTransform(
+#                     {
+#                         "observation/image": "image",
+#                         "observation/wrist_image": "wrist_image",
+#                         "observation/state": "state",
+#                         "actions": "actions",
+#                         "prompt": "prompt",
+#                     }
+#                 )
+#             ]
+#         )
+
+#         data_transforms = _transforms.Group(
+#             inputs=[maniskill_policy.ManiskillInputs(model_type=model_config.model_type)],
+#             outputs=[maniskill_policy.ManiskillOutputs()],
+#         )
+
+#         # For Panda: first 7 dims are joints (delta), 8th is gripper (absolute).
+#         if self.extra_delta_transform:
+#             delta_action_mask = _transforms.make_bool_mask(7, -1)
+#             data_transforms = data_transforms.push(
+#                 inputs=[_transforms.DeltaActions(delta_action_mask)],
+#                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+#             )
+
+#         model_transforms = ModelTransformFactory()(model_config)
+
+#         return dataclasses.replace(
+#             self.create_base_config(assets_dirs, model_config),
+#             repack_transforms=repack_transform,
+#             data_transforms=data_transforms,
+#             model_transforms=model_transforms,
+#         )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -840,7 +887,7 @@ _CONFIGS = [
         data=LeRobotManiskillDataConfig(
             repo_id="/root/workspace/data_gen/0316_verb_color/lerobot_dataset",  #modify the dataset path
             base_config=DataConfig(prompt_from_task=True),
-            extra_delta_transform=False,
+            use_joint_delta_transform=True,
         ),
         batch_size=256,
         lr_schedule=_optimizer.CosineDecaySchedule(
@@ -853,8 +900,8 @@ _CONFIGS = [
         ema_decay=0.999,
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/root/workspace/openpi/ckpt/pi05-libero",
-        num_train_steps=20_000,  # eg. 5000、10000
-        save_interval=4000,  # how many steps to save the checkpoint
+        num_train_steps=18_000,  # eg. 5000、10000
+        save_interval=6_000,  # how many steps to save the checkpoint
     ),
     #
     # Fine-tuning Aloha configs.

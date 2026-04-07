@@ -1,0 +1,5 @@
+pip install torch torchvision torchaudio  -i https://mirrors.aliyun.com/pypi/simple 
+
+uv sync --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-24-08.html#rel-24-08

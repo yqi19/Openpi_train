@@ -1,0 +1,44 @@
+FROM infra-registry-vpc.cn-wulanchabu.cr.aliyuncs.com/data-infra/fuyao:foundation_model_base_nvcr_pytorch_2502-0.0.8
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV MAX_JOBS=1
+ENV TZ=America/Los_Angeles
+
+# 安装 uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+# symlink：让 /root/workspace 指向你的挂载目录
+RUN ln -s /workspace/yu.qi@xiaopeng.com/workspace /root/workspace
+
+# 只 COPY 安装依赖所需的最小文件（不是全部代码）
+WORKDIR /tmp/openpi-build
+COPY pyproject.toml uv.lock ./
+COPY src/openpi/models_pytorch/transformers_replace ./transformers_replace
+
+# 装好所有依赖到固定路径，不需要进容器再装
+ENV UV_PROJECT_ENVIRONMENT=/opt/openpi-venv
+RUN GIT_LFS_SKIP_SMUDGE=1 uv sync \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    uv pip install datasets==3.0.0 \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 替换 transformers（注意原文有拼写错误：transformers 不是 trnasformers）
+RUN cp -r /tmp/openpi-build/transformers_replace/* \
+    /opt/openpi-venv/lib/python3.11/site-packages/transformers/ && \
+    rm -rf /tmp/openpi-build
+
+# conda 默认激活 python312
+RUN echo "conda activate python312" >> /root/.bashrc
+RUN echo "source /opt/openpi-venv/bin/activate" >> /root/.bashrc
+
+# jupyterlab
+ARG PIP_OPTIONS="-i https://nexus-wl.xiaopeng.link/repository/ai_infra_pypi_group/simple --timeout 120"
+RUN pip install ${PIP_OPTIONS} \
+    jupyterlab==4.5.1 \
+    jupyterlab-tensorboard-pro==4.0.0 \
+    tensorboard==2.20.0
+
+COPY --from=infra-registry.cn-wulanchabu.cr.aliyuncs.com/data-infra/public:fuyao-base-1.9.7 \
+    /opt/data-infra /opt/data-infra
+ENV PATH="${PATH}:/opt/data-infra"
