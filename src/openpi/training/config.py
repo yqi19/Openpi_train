@@ -880,7 +880,7 @@ _CONFIGS = [
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=30_000,
     ),
-    ## finetune maniskill config
+    ## finetune maniskill config — pi0.5 (VLM-conditioned)
     TrainConfig(
         name="pi05_maniskill",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
@@ -902,6 +902,43 @@ _CONFIGS = [
         pytorch_weight_path="/root/workspace/openpi/ckpt/pi05-libero",
         num_train_steps=18_000,  # eg. 5000、10000
         save_interval=6_000,  # how many steps to save the checkpoint
+    ),
+    ## finetune maniskill config — pi0 (base, smaller, no VLM backbone)
+    TrainConfig(
+        name="pi0_maniskill",
+        model=pi0_config.Pi0Config(action_horizon=10, discrete_state_input=False),  # pi05=False
+        data=LeRobotManiskillDataConfig(
+            repo_id="/root/workspace/data_gen/0316_verb_color/lerobot_dataset",  #modify the dataset path
+            base_config=DataConfig(prompt_from_task=True),
+            use_joint_delta_transform=True,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        pytorch_weight_path="/root/workspace/openpi/ckpt/pi0-libero-base",
+        num_train_steps=18_000,  # eg. 5000、10000
+        save_interval=6_000,  # how many steps to save the checkpoint
+    ),
+    ## finetune maniskill config — pi0-FAST (autoregressive, faster inference)
+    TrainConfig(
+        name="pi0_fast_maniskill",
+        model=pi0_fast.Pi0FASTConfig(action_dim=8, action_horizon=10, max_token_len=180),
+        data=LeRobotManiskillDataConfig(
+            repo_id="/root/workspace/data_gen/0316_verb_color/lerobot_dataset",  # modify the dataset path
+            base_config=DataConfig(prompt_from_task=True),
+            use_joint_delta_transform=True,
+        ),
+        batch_size=32,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_fast_base/params"),
+        num_train_steps=14_000,  # adjust as needed
+        save_interval=10_000,
     ),
     #
     # Fine-tuning Aloha configs.
