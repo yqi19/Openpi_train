@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Usage: ./resume_run.sh <exp_name> <repo_id_or_dataset_path>
-# Example: ./resume_run.sh verb_color_0316_1 /root/workspace/data_gen/0316_verb_color_1/lerobot_dataset
+# Usage: ./resume_run.sh <exp_name> <repo_id_or_dataset_path> [config_name]
+# Example: ./resume_run.sh verb_color_0316_1 /path/to/lerobot_dataset
+#          ./resume_run.sh my_pi0_exp /path/to/data pi0_maniskill
+#
+# Env overrides: EXTRA_STEPS (default 10000), SAVE_INTERVAL (default 3000), NPROC (default 8)
 set -euo pipefail
 cd "$(dirname "$0")"
 export PYTHONUNBUFFERED=1
 
-EXP_NAME="${1:?Usage: $0 <exp_name> <repo_id_or_dataset_path>}"
-REPO_ID="${2:?Usage: $0 <exp_name> <repo_id_or_dataset_path>}"
+EXP_NAME="${1:?Usage: $0 <exp_name> <repo_id_or_dataset_path> [config_name]}"
+REPO_ID="${2:?Usage: $0 <exp_name> <repo_id_or_dataset_path> [config_name]}"
+CONFIG="${3:-pi05_maniskill}"
 
 EXTRA_STEPS="${EXTRA_STEPS:-10000}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-3000}"
 NPROC="${NPROC:-8}"
 
-CKPT_DIR="checkpoints/pi05_maniskill/${EXP_NAME}"
+CKPT_DIR="checkpoints/${CONFIG}/${EXP_NAME}"
 if [[ ! -d "${CKPT_DIR}" ]]; then
   echo "Checkpoint dir not found: $(pwd)/${CKPT_DIR}"
   exit 1
@@ -30,11 +34,11 @@ mkdir -p run
 LOG="run/${EXP_NAME}_resume.log"
 
 echo "Logging to $LOG"
-echo "exp_name=${EXP_NAME} repo_id=${REPO_ID}"
+echo "exp_name=${EXP_NAME} repo_id=${REPO_ID} config=${CONFIG}"
 echo "last_step=${LAST_STEP} -> num_train_steps=${TARGET_STEPS} save_interval=${SAVE_INTERVAL}"
 
 uv run torchrun --standalone --nnodes=1 --nproc_per_node="${NPROC}" \
-  scripts/train_pytorch.py pi05_maniskill \
+  scripts/train_pytorch.py "${CONFIG}" \
   --exp_name "${EXP_NAME}" \
   --data.repo_id "${REPO_ID}" \
   --resume \
@@ -43,8 +47,3 @@ uv run torchrun --standalone --nnodes=1 --nproc_per_node="${NPROC}" \
   2>&1 | tee "${LOG}"
 
 echo "Resume training finished"
-
-
-cd /root/workspace
-python occupy_gpu.py
-echo "Successfully occupied GPU"
