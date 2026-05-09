@@ -448,9 +448,9 @@ def train_loop(config: _config.TrainConfig):
         with safetensors.safe_open(model_path, framework="pt", device="cpu") as f:
             for key in f.keys():
                 state_dict[key] = f.get_tensor(key)
-        if state_dict and all(k.startswith("model.") for k in state_dict.keys()):
-            logging.info("Stripping 'model.' prefix from checkpoint keys")
-            state_dict = {k[len("model."):]: v for k, v in state_dict.items()}
+        if state_dict and any(k.startswith("model.") for k in state_dict.keys()):
+            logging.info("Stripping 'model.' prefix from checkpoint keys (partial or full)")
+            state_dict = {(k[len("model."):] if k.startswith("model.") else k): v for k, v in state_dict.items()}
         target_model = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
         target_model.load_state_dict(state_dict)
         logging.info(f"Loaded PyTorch weights from {config.pytorch_weight_path}")
