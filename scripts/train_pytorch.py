@@ -451,6 +451,14 @@ def train_loop(config: _config.TrainConfig):
         if state_dict and any(k.startswith("model.") for k in state_dict.keys()):
             logging.info("Stripping 'model.' prefix from checkpoint keys (partial or full)")
             state_dict = {(k[len("model."):] if k.startswith("model.") else k): v for k, v in state_dict.items()}
+        # Handle tied weights: PaliGemma lm_head and embed_tokens share weights.
+        # Some checkpoints omit embed_tokens.weight (saving only lm_head.weight).
+        # Synthesize the missing tied embedding weight here.
+        LM_HEAD_KEY = "paligemma_with_expert.paligemma.lm_head.weight"
+        EMBED_KEY = "paligemma_with_expert.paligemma.model.language_model.embed_tokens.weight"
+        if LM_HEAD_KEY in state_dict and EMBED_KEY not in state_dict:
+            logging.info(f"Adding tied weight: {EMBED_KEY} ← {LM_HEAD_KEY}")
+            state_dict[EMBED_KEY] = state_dict[LM_HEAD_KEY]
         target_model = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
         target_model.load_state_dict(state_dict)
         logging.info(f"Loaded PyTorch weights from {config.pytorch_weight_path}")
