@@ -49,7 +49,7 @@ image = (
     # Cache bust: 2026-05-09d — fix tied embed_tokens weight for pi0-droid
     .run_commands(
         "echo 'build: 2026-05-09d' && "
-        "git clone https://github.com/yqi19/Openpi_train.git /root/openpi_train && "
+        "git clone --branch pi0 https://github.com/yqi19/Openpi_train.git /root/openpi_train && "
         "cd /root/openpi_train && git log --oneline -3",
     )
     .run_commands(
