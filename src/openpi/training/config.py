@@ -926,6 +926,29 @@ _CONFIGS = [
         num_train_steps=18_000,  # eg. 5000、10000
         save_interval=6_000,  # how many steps to save the checkpoint
     ),
+    ## finetune maniskill config — pi0-droid (pi0 fine-tuned on DROID dataset, better generalization)
+    TrainConfig(
+        name="pi0_droid_maniskill",
+        model=pi0_config.Pi0Config(action_horizon=10, discrete_state_input=False),
+        data=LeRobotManiskillDataConfig(
+            repo_id="/root/workspace/data_gen/0316_verb_color/lerobot_dataset",  # modify the dataset path
+            base_config=DataConfig(prompt_from_task=True),
+            use_joint_delta_transform=True,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_droid/params"),
+        pytorch_weight_path="/root/workspace/openpi/ckpt/pi0-droid",
+        num_train_steps=18_000,
+        save_interval=6_000,
+    ),
     ## finetune maniskill config — pi0-FAST (autoregressive, faster inference)
     TrainConfig(
         name="pi0_fast_maniskill",
