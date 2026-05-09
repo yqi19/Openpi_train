@@ -46,8 +46,9 @@ image = (
     .run_commands("curl -LsSf https://astral.sh/uv/install.sh | sh")
     .env({"PATH": "/root/.local/bin:$PATH"})
     # Clone the Openpi_train repo (same repo, has pi0_maniskill config)
-    # Cache bust: 2026-05-09b — ensures fresh clone with pi0_droid_maniskill config
+    # Cache bust: 2026-05-09c — run_commands change to force fresh clone
     .run_commands(
+        "echo 'build: 2026-05-09c' && "
         "git clone https://github.com/yqi19/Openpi_train.git /root/openpi_train && "
         "cd /root/openpi_train && git log --oneline -3",
     )
