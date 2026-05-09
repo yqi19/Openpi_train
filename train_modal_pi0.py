@@ -86,12 +86,15 @@ def train(
     save_interval: int = 2000,
     nproc: int = 1,
     ckpt_name: str = "pi0-libero-base",
+    batch_size: int = 0,
 ):
     """Run pi0/pi0_droid training inside the Modal container.
 
     Args:
         ckpt_name: Name of the checkpoint folder in Modal volume /ckpt/.
                    Use 'pi0-libero-base' (default) or 'pi0-droid'.
+        batch_size: Override batch size. 0 = use config default (256).
+                    For single H100, use 32 or 64 with pi0_droid.
     """
     import subprocess
 
@@ -137,19 +140,22 @@ def train(
     log_dir = f"{VOLUME_MOUNT}/logs/{exp_name}"
     os.makedirs(log_dir, exist_ok=True)
 
+    train_cmd = [
+        "uv", "run",
+        "torchrun",
+        "--standalone",
+        "--nnodes=1",
+        f"--nproc_per_node={nproc}",
+        "scripts/train_pytorch.py", config_name,
+        "--exp_name", exp_name,
+        "--data.repo_id", data_path,
+        "--num_train_steps", str(num_train_steps),
+        "--save_interval", str(save_interval),
+    ]
+    if batch_size > 0:
+        train_cmd += ["--batch_size", str(batch_size)]
     subprocess.run(
-        [
-            "uv", "run",
-            "torchrun",
-            "--standalone",
-            "--nnodes=1",
-            f"--nproc_per_node={nproc}",
-            "scripts/train_pytorch.py", config_name,
-            "--exp_name", exp_name,
-            "--data.repo_id", data_path,
-            "--num_train_steps", str(num_train_steps),
-            "--save_interval", str(save_interval),
-        ],
+        train_cmd,
         cwd=repo_dir,
         check=True,
         env={
@@ -177,6 +183,7 @@ def main(
     save_interval: int = 2000,
     nproc: int = 1,
     ckpt_name: str = "pi0-libero-base",
+    batch_size: int = 0,
 ):
     """
     Submit pi0/pi0_droid training job to Modal.
@@ -190,8 +197,10 @@ def main(
         nproc:              Number of GPUs (default 1; use 8 for full training)
         ckpt_name:          Checkpoint name in Modal volume /ckpt/ (default: pi0-libero-base)
                             Use 'pi0-droid' for DROID-pretrained weights
+        batch_size:         Override batch size. 0 = use config default (256).
+                            For single H100 with pi0_droid, use 32 or 64.
     """
-    print(f"Submitting pi0 training job: {exp_name} ({config_name}, {nproc} GPU, ckpt={ckpt_name})")
+    print(f"Submitting pi0 training job: {exp_name} ({config_name}, {nproc} GPU, ckpt={ckpt_name}, batch_size={'default' if batch_size == 0 else batch_size})")
     train.remote(
         exp_name=exp_name,
         data_volume_path=data_volume_path,
@@ -200,4 +209,5 @@ def main(
         save_interval=save_interval,
         nproc=nproc,
         ckpt_name=ckpt_name,
+        batch_size=batch_size,
     )
